@@ -1,0 +1,10 @@
+spring:
+  ai:
+    model:
+      chat: google-genai
+    google:
+      genai:
+        api-key: ${GOOGLE_AI_API_KEY:}
+        chat:
+          options:
+            model: ${GOOGLE_AI_MODEL:gemini-3-flash-preview}

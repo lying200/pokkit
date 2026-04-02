@@ -11,6 +11,10 @@ build/
 # IDE
 .idea/
 *.iml
+.classpath
+.project
+.settings/
+bin/
 
 # Environment
 .env

@@ -1,8 +1,16 @@
+pokkit:
+  provider: ${POKKIT_PROVIDER:openai}
+
 spring:
+  profiles:
+    active: ${POKKIT_PROVIDER:openai}
   ai:
-    openai:
-      api-key: ${OPENAI_API_KEY:sk-placeholder}
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
-      chat:
-        options:
-          model: ${OPENAI_MODEL:gpt-4o}
+    model:
+      # 只激活选定的 provider，其余自动禁用
+      chat: ${POKKIT_PROVIDER:openai}
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
