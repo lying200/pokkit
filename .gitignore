@@ -1,0 +1,16 @@
+# devinit: devenv ignores
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+.direnv
+
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+
+# Environment
+.env
