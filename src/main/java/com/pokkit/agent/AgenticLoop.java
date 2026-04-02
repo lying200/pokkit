@@ -9,6 +9,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.MessageAggregator;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
@@ -17,27 +18,30 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 import org.jspecify.annotations.NullMarked;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Agentic Loop — 整个项目的核心。
  * <p>
- * 一个受控的 while(true) 循环：
- * 1. 把消息历史发给 LLM
- * 2. LLM 返回文本 → 结束
- * LLM 返回 tool_call → 确认 → 执行工具 → 结果放回消息历史 → 继续
+ * 流式 while(true) 循环：
+ * 1. 流式调用 LLM，逐 token 打印到终端
+ * 2. 流结束后检查聚合结果：有 tool call → 确认 → 执行 → 继续；没有 → break
  */
 public class AgenticLoop {
 
     private static final int DEFAULT_MAX_STEPS = 20;
+    private static final int DOOM_LOOP_THRESHOLD = 3;
     private static final int MAX_OUTPUT_LENGTH = 10000;
     private static final boolean IS_WINDOWS =
             System.getProperty("os.name", "").toLowerCase().startsWith("win");
 
     private static final String SYSTEM_PROMPT = """
             You are a helpful coding assistant. You have access to tools that let you \
-            read files and execute shell commands. Use them to help the user with their tasks.
+            read files, write files, search for files, and execute shell commands. \
+            Use them to help the user with their tasks.
 
             When you need to explore code or run commands, use the available tools. \
             Think step by step and use tools as needed to accomplish the task.
@@ -76,13 +80,14 @@ public class AgenticLoop {
                 .toolCallbacks(toolCallbacks)
                 .build();
 
+        LinkedList<String> recentToolCalls = new LinkedList<>();
+
         int step = 0;
         while (true) {
             step++;
-            System.out.println("[loop] step " + step);
 
             if (step > maxSteps) {
-                System.out.println("[loop] max steps reached (" + maxSteps + "), stopping");
+                System.out.println("\n[loop] max steps reached (" + maxSteps + "), stopping");
                 return;
             }
 
@@ -90,23 +95,41 @@ public class AgenticLoop {
             messages.add(new SystemMessage(SYSTEM_PROMPT));
             messages.addAll(conversationHistory);
 
-            ChatResponse response = chatModel.call(new Prompt(messages, options));
+            // 流式调用 LLM，逐 token 打印
+            ChatResponse response = streamAndPrint(new Prompt(messages, options));
+            if (response == null) {
+                System.out.println("\n[loop] empty response from LLM, stopping");
+                return;
+            }
+
             var generation = response.getResult();
             if (generation == null) {
-                System.out.println("[loop] empty response from LLM, stopping");
+                System.out.println("\n[loop] empty generation, stopping");
                 return;
             }
             AssistantMessage assistant = generation.getOutput();
             conversationHistory.add(assistant);
 
             if (!response.hasToolCalls()) {
-                System.out.println("[loop] done");
-                System.out.println("\n" + assistant.getText());
+                System.out.println();
                 return;
             }
 
+            System.out.println();
             List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
             for (AssistantMessage.ToolCall toolCall : assistant.getToolCalls()) {
+                // Doom loop 检测
+                String signature = toolCall.name() + ":" + toolCall.arguments();
+                recentToolCalls.addLast(signature);
+                if (recentToolCalls.size() > DOOM_LOOP_THRESHOLD) {
+                    recentToolCalls.removeFirst();
+                }
+                if (recentToolCalls.size() == DOOM_LOOP_THRESHOLD
+                        && recentToolCalls.stream().distinct().count() == 1) {
+                    System.out.println("[doom loop] same tool call repeated " + DOOM_LOOP_THRESHOLD + " times, stopping");
+                    return;
+                }
+
                 String argsPreview = toolCall.arguments().length() <= 120
                         ? toolCall.arguments() : toolCall.arguments().substring(0, 120) + "...";
                 System.out.println("[tool] " + toolCall.name() + " " + argsPreview);
@@ -133,7 +156,6 @@ public class AgenticLoop {
                 System.out.println("\n[result] " + toolCall.name());
                 System.out.println(outputPreview);
                 System.out.println();
-
                 String jsonOutput = "{\"result\":" + quoteJson(output) + "}";
                 toolResponses.add(new ToolResponseMessage.ToolResponse(
                         toolCall.id(), toolCall.name(), jsonOutput));
@@ -143,6 +165,24 @@ public class AgenticLoop {
                     .responses(toolResponses)
                     .build());
         }
+    }
+
+    private ChatResponse streamAndPrint(Prompt prompt) {
+        AtomicReference<ChatResponse> aggregated = new AtomicReference<>();
+
+        var flux = chatModel.stream(prompt);
+        flux = new MessageAggregator().aggregate(flux, aggregated::set);
+
+        flux.doOnNext(chunk -> {
+            if (chunk.getResult() != null) {
+                String text = chunk.getResult().getOutput().getText();
+                if (text != null) {
+                    System.out.print(text);
+                }
+            }
+        }).blockLast();
+
+        return aggregated.get();
     }
 
     private boolean askConfirmation(String toolName, String argsPreview) {
