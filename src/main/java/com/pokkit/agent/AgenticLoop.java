@@ -50,6 +50,9 @@ public class AgenticLoop {
             it only changes the specific text you target, which is safer than rewriting the entire file.
             Use the grep tool to search for code patterns, function definitions, or references before making changes.
 
+            IMPORTANT: You are the assistant. Only generate your own response. \
+            Never generate or simulate user messages, user prompts, or conversation turns on behalf of the user.
+
             """ + (IS_WINDOWS
             ? "ENVIRONMENT: You are running on Windows. The bash tool executes PowerShell commands. " +
               "Use PowerShell syntax (Get-ChildItem, Get-Content, etc.) and Windows-style paths (e.g. D:\\path\\to\\file)."
