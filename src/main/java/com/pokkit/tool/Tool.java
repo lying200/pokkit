@@ -18,7 +18,4 @@ public interface Tool {
 
     /** 执行工具。入参是 LLM 传过来的 JSON string，返回文本结果喂回 LLM */
     String execute(String argumentsJson);
-
-    /** 这个工具是否需要用户确认才能执行。默认 false */
-    default boolean requiresConfirmation() { return false; }
 }

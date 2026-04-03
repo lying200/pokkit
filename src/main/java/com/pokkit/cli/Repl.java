@@ -1,6 +1,8 @@
 package com.pokkit.cli;
 
 import com.pokkit.agent.AgenticLoop;
+import com.pokkit.permission.Permission.Rule;
+import com.pokkit.permission.PermissionService;
 import com.pokkit.session.Session;
 import com.pokkit.session.SessionRepository;
 import com.pokkit.tool.BashTool;
@@ -50,7 +52,6 @@ public class Repl implements CommandLineRunner {
         registry.register(new GrepTool());
 
         Scanner scanner = new Scanner(System.in);
-        AgenticLoop loop = new AgenticLoop(chatModel, registry, scanner);
 
         // 打开数据库
         String dbPath = System.getProperty("pokkit.db",
@@ -64,9 +65,18 @@ public class Repl implements CommandLineRunner {
         current[0] = repo.lastSession().orElseGet(() -> repo.createSession("新会话"));
         history.addAll(repo.loadMessages(current[0].id()));
 
+        // 恢复 session 级权限规则
+        List<Rule> restoredRules = repo.loadPermissions(current[0].id());
+        PermissionService permissionService = new PermissionService(scanner, restoredRules);
+
+        AgenticLoop loop = new AgenticLoop(chatModel, registry, permissionService);
+
         System.out.println("Pokkit Agent (输入 /help 查看命令，exit 退出)");
         System.out.println("会话: " + current[0].title());
         System.out.println("历史: " + history.size() + " 条消息已加载");
+        if (!restoredRules.isEmpty()) {
+            System.out.println("权限: " + restoredRules.size() + " 条 always 规则已恢复");
+        }
         System.out.println("==================================");
 
         while (true) {
@@ -78,7 +88,7 @@ public class Repl implements CommandLineRunner {
 
             // 命令分发
             if (input.startsWith("/")) {
-                current[0] = handleCommand(input, repo, current[0], history);
+                current[0] = handleCommand(input, repo, current[0], history, permissionService);
                 continue;
             }
 
@@ -98,6 +108,9 @@ public class Repl implements CommandLineRunner {
                     repo.saveMessage(current[0].id(), i, history.get(i));
                 }
             }
+
+            // 持久化权限规则
+            repo.savePermissions(current[0].id(), permissionService.getSessionRules());
             repo.touchSession(current[0].id());
 
             // 第一条用户消息时自动生成标题
@@ -113,11 +126,13 @@ public class Repl implements CommandLineRunner {
     }
 
     private Session handleCommand(String input, SessionRepository repo,
-                                  Session current, List<Message> history) {
+                                  Session current, List<Message> history,
+                                  PermissionService permissionService) {
         String cmd = input.split("\\s+")[0].toLowerCase();
         return switch (cmd) {
             case "/new" -> {
                 history.clear();
+                permissionService.resetSessionRules();
                 Session s = repo.createSession("新会话");
                 System.out.println("已创建新会话");
                 yield s;
@@ -142,6 +157,7 @@ public class Repl implements CommandLineRunner {
             }
             case "/clear" -> {
                 history.clear();
+                permissionService.resetSessionRules();
                 repo.deleteAllSessions();
                 Session s = repo.createSession("新会话");
                 System.out.println("已清除所有会话，重新开始");
@@ -167,7 +183,6 @@ public class Repl implements CommandLineRunner {
     private static String generateTitle(String firstMessage) {
         String title = firstMessage.replaceAll("[\\n\\r]+", " ").trim();
         if (title.length() <= 80) return title;
-        // 截断在词边界
         int cutoff = title.lastIndexOf(' ', 77);
         if (cutoff <= 0) cutoff = 77;
         return title.substring(0, cutoff) + "...";

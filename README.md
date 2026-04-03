@@ -49,6 +49,12 @@
   - 超过 80K token 自动触发，长对话不再溢出
   - [设计文档](docs/05-compaction.md)
 
+- **v0.6-permission** — 权限系统
+  - 参考 OpenCode 的三值逻辑：allow / deny / ask
+  - 用户可选 always 记住权限，session 内不再重复询问
+  - 规则评估 last match wins，权限从工具中解耦到统一服务
+  - [设计文档](docs/06-permission.md)
+
 ## 快速开始
 
 ```bash
@@ -82,6 +88,9 @@ src/main/java/com/pokkit/
 ├── PokkitApplication.java       # Spring Boot 启动
 ├── agent/
 │   └── AgenticLoop.java         # 核心：agentic loop
+├── permission/
+│   ├── Permission.java          # Action 枚举 + Rule record
+│   └── PermissionService.java  # 规则评估 + 用户交互
 ├── session/
 │   ├── Session.java             # 会话记录
 │   ├── MessageSerializer.java   # Message ↔ DB 序列化

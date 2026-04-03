@@ -43,9 +43,6 @@ public class WriteTool implements Tool {
     }
 
     @Override
-    public boolean requiresConfirmation() { return true; }
-
-    @Override
     @SuppressWarnings("unchecked")
     public String execute(String argumentsJson) {
         try {

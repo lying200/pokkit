@@ -1,6 +1,10 @@
 package com.pokkit.session;
 
+import com.pokkit.permission.Permission;
+import com.pokkit.permission.Permission.Action;
+import com.pokkit.permission.Permission.Rule;
 import org.springframework.ai.chat.messages.Message;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,10 +57,11 @@ public class SessionRepository implements AutoCloseable {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS sessions (
-                        id         TEXT PRIMARY KEY,
-                        title      TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
+                        id          TEXT PRIMARY KEY,
+                        title       TEXT NOT NULL,
+                        permissions TEXT,
+                        created_at  TEXT NOT NULL,
+                        updated_at  TEXT NOT NULL
                     )
                     """);
             stmt.execute("""
@@ -75,6 +80,13 @@ public class SessionRepository implements AutoCloseable {
                     CREATE INDEX IF NOT EXISTS idx_messages_session
                     ON messages(session_id, ordinal)
                     """);
+
+            // 兼容旧数据库：如果 permissions 列不存在则添加
+            try {
+                stmt.execute("ALTER TABLE sessions ADD COLUMN permissions TEXT");
+            } catch (SQLException ignored) {
+                // 列已存在，忽略
+            }
         }
     }
 
@@ -146,6 +158,45 @@ public class SessionRepository implements AutoCloseable {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to touch session", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Rule> loadPermissions(String sessionId) {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT permissions FROM sessions WHERE id = ?")) {
+            ps.setString(1, sessionId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String json = rs.getString("permissions");
+                if (json != null && !json.isEmpty()) {
+                    List<List<String>> raw = JsonMapper.shared().readValue(json, List.class);
+                    return raw.stream()
+                            .map(r -> new Rule(r.get(0), Action.valueOf(r.get(1))))
+                            .toList();
+                }
+            }
+            return List.of();
+        } catch (Exception e) {
+            return List.of(); // 解析失败不阻塞启动
+        }
+    }
+
+    public void savePermissions(String sessionId, List<Rule> rules) {
+        try {
+            List<List<String>> raw = rules.stream()
+                    .map(r -> List.of(r.toolName(), r.action().name()))
+                    .toList();
+            String json = JsonMapper.shared().writeValueAsString(raw);
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "UPDATE sessions SET permissions = ?, updated_at = ? WHERE id = ?")) {
+                ps.setString(1, json);
+                ps.setString(2, Instant.now().toString());
+                ps.setString(3, sessionId);
+                ps.executeUpdate();
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to save permissions", e);
         }
     }
 

@@ -1,5 +1,6 @@
 package com.pokkit.agent;
 
+import com.pokkit.permission.PermissionService;
 import com.pokkit.tool.Tool;
 import com.pokkit.tool.ToolRegistry;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -20,7 +21,6 @@ import org.jspecify.annotations.NullMarked;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -61,18 +61,19 @@ public class AgenticLoop {
 
     private final ChatModel chatModel;
     private final ToolRegistry toolRegistry;
-    private final Scanner scanner;
+    private final PermissionService permissionService;
     private final MessageCompactor compactor;
     private final int maxSteps;
 
-    public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry, Scanner scanner) {
-        this(chatModel, toolRegistry, scanner, DEFAULT_MAX_STEPS);
+    public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry, PermissionService permissionService) {
+        this(chatModel, toolRegistry, permissionService, DEFAULT_MAX_STEPS);
     }
 
-    public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry, Scanner scanner, int maxSteps) {
+    public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry,
+                       PermissionService permissionService, int maxSteps) {
         this.chatModel = chatModel;
         this.toolRegistry = toolRegistry;
-        this.scanner = scanner;
+        this.permissionService = permissionService;
         this.compactor = new MessageCompactor(chatModel);
         this.maxSteps = maxSteps;
     }
@@ -153,7 +154,10 @@ public class AgenticLoop {
                 String output;
                 try {
                     Tool tool = toolRegistry.get(toolCall.name());
-                    if (tool.requiresConfirmation() && !askConfirmation(toolCall.name(), argsPreview)) {
+                    var permResult = permissionService.check(toolCall.name(), argsPreview);
+                    if (permResult == PermissionService.CheckResult.DENIED) {
+                        output = "Permission denied for this tool call by rule. Try a different approach.";
+                    } else if (permResult == PermissionService.CheckResult.REJECTED) {
                         output = "User rejected this tool call. Adjust your approach or ask the user what they'd prefer.";
                     } else {
                         output = tool.execute(toolCall.arguments());
@@ -199,17 +203,6 @@ public class AgenticLoop {
         }).blockLast();
 
         return aggregated.get();
-    }
-
-    private boolean askConfirmation(String toolName, String argsPreview) {
-        System.out.print("[confirm] allow " + toolName + ": " + argsPreview + "? (y/n): ");
-        System.out.flush();
-        String answer = scanner.nextLine().trim().toLowerCase();
-        boolean allowed = answer.equals("y") || answer.equals("yes");
-        if (!allowed && !answer.equals("n") && !answer.equals("no")) {
-            System.out.println("[confirm] unrecognized input '" + answer + "', treating as reject");
-        }
-        return allowed;
     }
 
     private ToolCallback toToolCallback(Tool tool) {
