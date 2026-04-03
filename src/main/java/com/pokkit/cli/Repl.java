@@ -2,7 +2,9 @@ package com.pokkit.cli;
 
 import com.pokkit.agent.AgenticLoop;
 import com.pokkit.tool.BashTool;
+import com.pokkit.tool.EditTool;
 import com.pokkit.tool.GlobTool;
+import com.pokkit.tool.GrepTool;
 import com.pokkit.tool.ReadTool;
 import com.pokkit.tool.ToolRegistry;
 import com.pokkit.tool.WriteTool;
@@ -35,7 +37,9 @@ public class Repl implements CommandLineRunner {
         registry.register(new BashTool());
         registry.register(new ReadTool());
         registry.register(new WriteTool());
+        registry.register(new EditTool());
         registry.register(new GlobTool());
+        registry.register(new GrepTool());
 
         Scanner scanner = new Scanner(System.in);
         AgenticLoop loop = new AgenticLoop(chatModel, registry, scanner);

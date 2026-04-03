@@ -40,11 +40,15 @@ public class AgenticLoop {
 
     private static final String SYSTEM_PROMPT = """
             You are a helpful coding assistant. You have access to tools that let you \
-            read files, write files, search for files, and execute shell commands. \
-            Use them to help the user with their tasks.
+            read files, edit files, write files, search for files and file contents, \
+            and execute shell commands. Use them to help the user with their tasks.
 
             When you need to explore code or run commands, use the available tools. \
             Think step by step and use tools as needed to accomplish the task.
+
+            Prefer the edit tool over write for modifying existing files — \
+            it only changes the specific text you target, which is safer than rewriting the entire file.
+            Use the grep tool to search for code patterns, function definitions, or references before making changes.
 
             """ + (IS_WINDOWS
             ? "ENVIRONMENT: You are running on Windows. The bash tool executes PowerShell commands. " +

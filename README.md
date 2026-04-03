@@ -30,6 +30,12 @@
   - Doom Loop 检测：同一工具连续 3 次相同参数自动停止
   - [设计文档](docs/02-streaming-and-tools.md)
 
+- **v0.3-edit-grep** — Edit + Grep 工具
+  - 新增 `edit` 工具：基于 old_string → new_string 的精确字符串替换，比 write 安全
+  - 新增 `grep` 工具：正则搜索文件内容，返回匹配行+行号
+  - Agent 编码闭环：grep → read → edit → bash
+  - [设计文档](docs/03-edit-grep-tools.md)
+
 ## 快速开始
 
 ```bash
@@ -66,8 +72,12 @@ src/main/java/com/pokkit/
 ├── tool/
 │   ├── Tool.java                # 工具接口
 │   ├── ToolRegistry.java        # 工具注册表
-│   ├── BashTool.java            # 执行 shell 命令
-│   └── ReadTool.java            # 读文件内容
+│   ├── BashTool.java            # 执行 shell/PowerShell 命令
+│   ├── ReadTool.java            # 读文件内容
+│   ├── WriteTool.java           # 写文件（整文件覆盖）
+│   ├── EditTool.java            # 精确字符串替换编辑
+│   ├── GlobTool.java            # 按文件名模式搜索
+│   └── GrepTool.java            # 按内容正则搜索
 └── cli/
     └── Repl.java                # 命令行交互
 
