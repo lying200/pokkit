@@ -190,10 +190,14 @@ public class AgenticLoop {
     }
 
     private boolean askConfirmation(String toolName, String argsPreview) {
-        System.out.print("[confirm] allow " + toolName + ": " + argsPreview + "? (y/n) ");
+        System.out.print("[confirm] allow " + toolName + ": " + argsPreview + "? (y/n): ");
         System.out.flush();
         String answer = scanner.nextLine().trim().toLowerCase();
-        return answer.equals("y") || answer.equals("yes");
+        boolean allowed = answer.equals("y") || answer.equals("yes");
+        if (!allowed && !answer.equals("n") && !answer.equals("no")) {
+            System.out.println("[confirm] unrecognized input '" + answer + "', treating as reject");
+        }
+        return allowed;
     }
 
     private ToolCallback toToolCallback(Tool tool) {
