@@ -2,6 +2,8 @@ pokkit:
   provider: ${POKKIT_PROVIDER:openai}
 
 spring:
+  main:
+    web-application-type: none
   profiles:
     active: ${POKKIT_PROVIDER:openai}
   ai:

@@ -24,6 +24,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.ai:spring-ai-starter-model-openai")
     implementation("org.springframework.ai:spring-ai-starter-model-google-genai")
+    implementation("org.xerial:sqlite-jdbc:3.49.1.0")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
