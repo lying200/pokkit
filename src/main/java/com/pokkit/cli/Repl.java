@@ -1,5 +1,7 @@
 package com.pokkit.cli;
 
+import com.pokkit.agent.AgentConfig;
+import com.pokkit.agent.AgentRegistry;
 import com.pokkit.agent.AgenticLoop;
 import com.pokkit.permission.Permission.Rule;
 import com.pokkit.permission.PermissionService;
@@ -10,6 +12,7 @@ import com.pokkit.tool.EditTool;
 import com.pokkit.tool.GlobTool;
 import com.pokkit.tool.GrepTool;
 import com.pokkit.tool.ReadTool;
+import com.pokkit.tool.TaskTool;
 import com.pokkit.tool.ToolRegistry;
 import com.pokkit.tool.WriteTool;
 import org.jspecify.annotations.NullMarked;
@@ -43,15 +46,21 @@ public class Repl implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        ToolRegistry registry = new ToolRegistry();
-        registry.register(new BashTool());
-        registry.register(new ReadTool());
-        registry.register(new WriteTool());
-        registry.register(new EditTool());
-        registry.register(new GlobTool());
-        registry.register(new GrepTool());
-
         Scanner scanner = new Scanner(System.in);
+
+        // Agent 注册表
+        AgentRegistry agentRegistry = new AgentRegistry();
+        AgentConfig primaryAgent = agentRegistry.defaultAgent();
+
+        // 工具注册（包括 TaskTool）
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.register(new BashTool());
+        toolRegistry.register(new ReadTool());
+        toolRegistry.register(new WriteTool());
+        toolRegistry.register(new EditTool());
+        toolRegistry.register(new GlobTool());
+        toolRegistry.register(new GrepTool());
+        toolRegistry.register(new TaskTool(chatModel, agentRegistry, toolRegistry, scanner));
 
         // 打开数据库
         String dbPath = System.getProperty("pokkit.db",
@@ -60,18 +69,17 @@ public class Repl implements CommandLineRunner {
 
         // 恢复最近会话或新建
         Session[] current = new Session[1];
-        List<Message> history = new ArrayList<>();
-
         current[0] = repo.lastSession().orElseGet(() -> repo.createSession("新会话"));
-        history.addAll(repo.loadMessages(current[0].id()));
+        List<Message> history = new ArrayList<>(repo.loadMessages(current[0].id()));
 
-        // 恢复 session 级权限规则
+        // 恢复 session 级权限规则，base rules 来自主 Agent 配置
         List<Rule> restoredRules = repo.loadPermissions(current[0].id());
-        PermissionService permissionService = new PermissionService(scanner, restoredRules);
+        PermissionService permissionService = new PermissionService(
+                scanner, primaryAgent.permissionRules(), restoredRules);
 
-        AgenticLoop loop = new AgenticLoop(chatModel, registry, permissionService);
+        AgenticLoop loop = new AgenticLoop(chatModel, toolRegistry, permissionService, primaryAgent);
 
-        System.out.println("Pokkit Agent (输入 /help 查看命令，exit 退出)");
+        System.out.println("Pokkit Agent [" + primaryAgent.name() + "] (输入 /help 查看命令，exit 退出)");
         System.out.println("会话: " + current[0].title());
         System.out.println("历史: " + history.size() + " 条消息已加载");
         if (!restoredRules.isEmpty()) {
@@ -86,9 +94,9 @@ public class Repl implements CommandLineRunner {
             if (input.isEmpty()) continue;
             if (input.equalsIgnoreCase("exit")) break;
 
-            // 命令分发
             if (input.startsWith("/")) {
-                current[0] = handleCommand(input, repo, current[0], history, permissionService);
+                current[0] = handleCommand(input, repo, current[0], history,
+                        permissionService);
                 continue;
             }
 
@@ -99,7 +107,7 @@ public class Repl implements CommandLineRunner {
                 log.error("Agent error", e);
             }
 
-            // 保存：如果发生了压缩，重写整个消息历史；否则增量保存
+            // 保存
             if (loop.getCompactor().wasCompacted()) {
                 repo.replaceMessages(current[0].id(), history);
                 loop.getCompactor().resetCompacted();
@@ -109,11 +117,9 @@ public class Repl implements CommandLineRunner {
                 }
             }
 
-            // 持久化权限规则
             repo.savePermissions(current[0].id(), permissionService.getSessionRules());
             repo.touchSession(current[0].id());
 
-            // 第一条用户消息时自动生成标题
             if (beforeSize == 0) {
                 String title = generateTitle(input);
                 repo.updateTitle(current[0].id(), title);

@@ -26,56 +26,27 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Agentic Loop — 整个项目的核心。
  * <p>
- * 流式 while(true) 循环：
- * 1. 流式调用 LLM，逐 token 打印到终端
- * 2. 流结束后检查聚合结果：有 tool call → 确认 → 执行 → 继续；没有 → break
+ * 接收 AgentConfig 来决定 system prompt、权限规则、最大步数。
+ * 同一个循环 + 不同配置 = 不同 Agent 行为。
  */
 public class AgenticLoop {
 
-    private static final int DEFAULT_MAX_STEPS = 20;
     private static final int DOOM_LOOP_THRESHOLD = 3;
     private static final int MAX_OUTPUT_LENGTH = 10000;
-    private static final boolean IS_WINDOWS =
-            System.getProperty("os.name", "").toLowerCase().startsWith("win");
-
-    private static final String SYSTEM_PROMPT = """
-            You are a helpful coding assistant. You have access to tools that let you \
-            read files, edit files, write files, search for files and file contents, \
-            and execute shell commands. Use them to help the user with their tasks.
-
-            When you need to explore code or run commands, use the available tools. \
-            Think step by step and use tools as needed to accomplish the task.
-
-            Prefer the edit tool over write for modifying existing files — \
-            it only changes the specific text you target, which is safer than rewriting the entire file.
-            Use the grep tool to search for code patterns, function definitions, or references before making changes.
-
-            IMPORTANT: You are the assistant. Only generate your own response. \
-            Never generate or simulate user messages, user prompts, or conversation turns on behalf of the user.
-
-            """ + (IS_WINDOWS
-            ? "ENVIRONMENT: You are running on Windows. The bash tool executes PowerShell commands. " +
-              "Use PowerShell syntax (Get-ChildItem, Get-Content, etc.) and Windows-style paths (e.g. D:\\path\\to\\file)."
-            : "ENVIRONMENT: You are running on a Unix-like system. The bash tool executes Bash commands. " +
-              "Use standard Unix commands and paths.");
 
     private final ChatModel chatModel;
     private final ToolRegistry toolRegistry;
     private final PermissionService permissionService;
     private final MessageCompactor compactor;
-    private final int maxSteps;
-
-    public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry, PermissionService permissionService) {
-        this(chatModel, toolRegistry, permissionService, DEFAULT_MAX_STEPS);
-    }
+    private final AgentConfig agentConfig;
 
     public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry,
-                       PermissionService permissionService, int maxSteps) {
+                       PermissionService permissionService, AgentConfig agentConfig) {
         this.chatModel = chatModel;
         this.toolRegistry = toolRegistry;
         this.permissionService = permissionService;
         this.compactor = new MessageCompactor(chatModel);
-        this.maxSteps = maxSteps;
+        this.agentConfig = agentConfig;
     }
 
     public MessageCompactor getCompactor() {
@@ -100,28 +71,26 @@ public class AgenticLoop {
         while (true) {
             step++;
 
-            if (step > maxSteps) {
-                System.out.println("\n[loop] max steps reached (" + maxSteps + "), stopping");
+            if (step > agentConfig.maxSteps()) {
+                System.out.println("\n[" + agentConfig.name() + "] max steps reached (" + agentConfig.maxSteps() + "), stopping");
                 return;
             }
 
-            // 压缩检查：在发给 LLM 之前确保不超限
             compactor.compactIfNeeded(conversationHistory);
 
             List<Message> messages = new ArrayList<>();
-            messages.add(new SystemMessage(SYSTEM_PROMPT));
+            messages.add(new SystemMessage(agentConfig.systemPrompt()));
             messages.addAll(conversationHistory);
 
-            // 流式调用 LLM，逐 token 打印
             ChatResponse response = streamAndPrint(new Prompt(messages, options));
             if (response == null) {
-                System.out.println("\n[loop] empty response from LLM, stopping");
+                System.out.println("\n[" + agentConfig.name() + "] empty response from LLM, stopping");
                 return;
             }
 
             var generation = response.getResult();
             if (generation == null) {
-                System.out.println("\n[loop] empty generation, stopping");
+                System.out.println("\n[" + agentConfig.name() + "] empty generation, stopping");
                 return;
             }
             AssistantMessage assistant = generation.getOutput();
@@ -149,7 +118,7 @@ public class AgenticLoop {
 
                 String argsPreview = toolCall.arguments().length() <= 120
                         ? toolCall.arguments() : toolCall.arguments().substring(0, 120) + "...";
-                System.out.println("[tool] " + toolCall.name() + " " + argsPreview);
+                System.out.println("[" + agentConfig.name() + ":tool] " + toolCall.name() + " " + argsPreview);
 
                 String output;
                 try {
@@ -170,7 +139,6 @@ public class AgenticLoop {
                     output = output.substring(0, MAX_OUTPUT_LENGTH) + "\n[output truncated]";
                 }
 
-                // 打印工具执行结果
                 String outputPreview = output.length() <= 500
                         ? output : output.substring(0, 500) + "\n... [truncated, total " + output.length() + " chars]";
                 System.out.println("\n[result] " + toolCall.name());
@@ -227,7 +195,7 @@ public class AgenticLoop {
         return new ToolCallbackAdapter();
     }
 
-    private static String quoteJson(String text) {
+    static String quoteJson(String text) {
         var sb = new StringBuilder("\"");
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);

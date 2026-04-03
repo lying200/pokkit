@@ -55,6 +55,13 @@
   - 规则评估 last match wins，权限从工具中解耦到统一服务
   - [设计文档](docs/06-permission.md)
 
+- **v0.7-multi-agent** — 多 Agent 编排
+  - AgentConfig + AgentRegistry：Agent = 配置 + 同一个循环
+  - 内置 3 个 Agent：coder（主）、explore（只读搜索）、planner（只读分析）
+  - TaskTool：LLM 自主决定委派子任务，子 Agent 独立消息历史
+  - 权限继承：子 Agent 禁止 task（防止嵌套），权限从 AgentConfig 获取
+  - [设计文档](docs/07-multi-agent.md)
+
 ## 快速开始
 
 ```bash

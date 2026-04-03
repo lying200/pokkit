@@ -13,37 +13,25 @@ import java.util.Scanner;
  * <p>
  * 规则评估用 "last match wins"（与 OpenCode 一致），
  * 用户选 "always" 后添加 session 级规则，后续不再询问。
+ * <p>
+ * baseRules 来自 AgentConfig，sessionRules 来自用户的 always 选择或 DB 恢复。
  */
 public class PermissionService {
 
-    /** 内置默认规则：读操作 allow，写操作 ask */
-    private static final List<Rule> DEFAULTS = List.of(
-            new Rule("read", Action.ALLOW),
-            new Rule("glob", Action.ALLOW),
-            new Rule("grep", Action.ALLOW),
-            new Rule("bash", Action.ASK),
-            new Rule("write", Action.ASK),
-            new Rule("edit", Action.ASK),
-            new Rule("*", Action.ASK)
-    );
-
     private final Scanner scanner;
+    private final List<Rule> baseRules;
     private final List<Rule> sessionRules;
 
-    public PermissionService(Scanner scanner) {
-        this(scanner, new ArrayList<>());
+    public PermissionService(Scanner scanner, List<Rule> baseRules) {
+        this(scanner, baseRules, new ArrayList<>());
     }
 
-    public PermissionService(Scanner scanner, List<Rule> restoredRules) {
+    public PermissionService(Scanner scanner, List<Rule> baseRules, List<Rule> restoredSessionRules) {
         this.scanner = scanner;
-        this.sessionRules = new ArrayList<>(restoredRules);
+        this.baseRules = List.copyOf(baseRules);
+        this.sessionRules = new ArrayList<>(restoredSessionRules);
     }
 
-    /**
-     * 检查工具是否有权限执行。
-     *
-     * @return CheckResult — ALLOWED / DENIED / REJECTED
-     */
     public CheckResult check(String toolName, String argsPreview) {
         Action action = evaluate(toolName);
 
@@ -68,15 +56,10 @@ public class PermissionService {
         };
     }
 
-    /**
-     * 规则评估 — last match wins，参考 OpenCode 的 evaluate()。
-     */
     Action evaluate(String toolName) {
-        // 合并 defaults + sessionRules，后者优先级更高
-        List<Rule> allRules = new ArrayList<>(DEFAULTS);
+        List<Rule> allRules = new ArrayList<>(baseRules);
         allRules.addAll(sessionRules);
 
-        // findLast：从后往前找第一个匹配的
         for (int i = allRules.size() - 1; i >= 0; i--) {
             Rule rule = allRules.get(i);
             if (rule.matches(toolName)) {
@@ -84,19 +67,13 @@ public class PermissionService {
             }
         }
 
-        return Action.ASK; // fallback
+        return Action.ASK;
     }
 
-    /**
-     * 获取当前 session 的 approved 规则（用于持久化）。
-     */
     public List<Rule> getSessionRules() {
         return List.copyOf(sessionRules);
     }
 
-    /**
-     * 重置 session 规则（新建会话时调用）。
-     */
     public void resetSessionRules() {
         sessionRules.clear();
     }
