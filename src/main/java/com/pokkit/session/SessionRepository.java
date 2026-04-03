@@ -207,6 +207,29 @@ public class SessionRepository implements AutoCloseable {
         }
     }
 
+    /**
+     * 压缩后重写整个 session 的消息（事务内：先删后插）。
+     */
+    public void replaceMessages(String sessionId, List<Message> messages) {
+        try {
+            connection.setAutoCommit(false);
+            try (PreparedStatement del = connection.prepareStatement(
+                    "DELETE FROM messages WHERE session_id = ?")) {
+                del.setString(1, sessionId);
+                del.executeUpdate();
+            }
+            for (int i = 0; i < messages.size(); i++) {
+                saveMessage(sessionId, i, messages.get(i));
+            }
+            connection.commit();
+        } catch (SQLException e) {
+            try { connection.rollback(); } catch (SQLException ignored) {}
+            throw new RuntimeException("Failed to replace messages", e);
+        } finally {
+            try { connection.setAutoCommit(true); } catch (SQLException ignored) {}
+        }
+    }
+
     // ==================== 内部方法 ====================
 
     private Session readSession(ResultSet rs) throws SQLException {

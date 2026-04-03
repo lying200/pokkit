@@ -118,6 +118,51 @@ Spring AI 2.0.0-M4 的 `AssistantMessage` 有两个构造函数：
 
 反序列化时需要带 ToolCall 列表，必须用 `AssistantMessage.builder().content(...).toolCalls(...).build()`。
 
+## OpenCode 做了但我们简化掉的
+
+### Part 粒度的消息存储
+
+OpenCode 不是存整条 Message，而是把每条消息拆成多个 Part（TextPart, ToolPart, ReasoningPart, PatchPart 等），
+每个 Part 独立存储在 `parts` 表中。ToolPart 还有状态机（pending → running → completed → error）。
+
+这种粒度使得：流式输出时可以实时更新单个 Part；TUI 可以做细粒度渲染；回滚可以精确到 Part 级别。
+
+**生产影响**：我们以整条 Message 为单位存储，无法做到部分更新和精确回滚。
+
+### 事件溯源（Event Sourcing）
+
+OpenCode 的 Session/Message 变更都通过 `SyncEvent` 发布，持久化层监听事件写入 DB。
+这使得多客户端（TUI + Web）能实时同步状态。
+
+**生产影响**：我们的持久化是命令式的（显式调用 save），无法支持多客户端实时同步。
+
+### 消息级实时持久化
+
+OpenCode 在 `SessionProcessor` 中，每收到一个流式 chunk 都立即写入 SQLite。
+我们在整轮 `AgenticLoop.run()` 结束后才批量保存。
+
+**生产影响**：长时间运行的 tool call 中途崩溃会丢失该轮所有上下文。
+
+### 数据库迁移系统
+
+OpenCode 有 11+ 个版本的 schema 迁移（`packages/opencode/migration/`），
+使用 Drizzle ORM 管理。我们用 `CREATE TABLE IF NOT EXISTS`，不支持 schema 演进。
+
+**生产影响**：schema 变更后无法自动迁移旧数据，需要用户手动 `/clear`。
+
+### Session 树结构
+
+OpenCode 的 Session 有 `parentID` 字段，支持父子关系（主 Agent 的 session 是父，
+子 Agent 的 session 是子）。子 session 继承父的权限子集。
+
+**生产影响**：没有 session 树，后续做多 Agent 时需要补上。
+
+### Todo/Task 持久化
+
+OpenCode 在 DB 中有独立的 `todos` 表，Agent 可以创建/更新待办事项，跨 session 持久化。
+
+**生产影响**：Agent 无法跨会话追踪长期任务。
+
 ## 不做什么
 
 | 不做 | 原因 |

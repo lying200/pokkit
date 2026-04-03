@@ -59,6 +59,7 @@ public class AgenticLoop {
     private final ChatModel chatModel;
     private final ToolRegistry toolRegistry;
     private final Scanner scanner;
+    private final MessageCompactor compactor;
     private final int maxSteps;
 
     public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry, Scanner scanner) {
@@ -69,7 +70,12 @@ public class AgenticLoop {
         this.chatModel = chatModel;
         this.toolRegistry = toolRegistry;
         this.scanner = scanner;
+        this.compactor = new MessageCompactor(chatModel);
         this.maxSteps = maxSteps;
+    }
+
+    public MessageCompactor getCompactor() {
+        return compactor;
     }
 
     public void run(String userInput, List<Message> conversationHistory) {
@@ -94,6 +100,9 @@ public class AgenticLoop {
                 System.out.println("\n[loop] max steps reached (" + maxSteps + "), stopping");
                 return;
             }
+
+            // 压缩检查：在发给 LLM 之前确保不超限
+            compactor.compactIfNeeded(conversationHistory);
 
             List<Message> messages = new ArrayList<>();
             messages.add(new SystemMessage(SYSTEM_PROMPT));

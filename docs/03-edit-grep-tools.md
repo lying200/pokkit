@@ -105,6 +105,48 @@ v0.3 更新了 system prompt，告诉 LLM：
 | `glob` | 按文件名模式搜索 | 否 |
 | `grep` | 按内容正则搜索 | 否 |
 
+## OpenCode 做了但我们简化掉的
+
+### Edit 工具的 9 种模糊匹配策略
+
+OpenCode 的 edit 工具不是简单的精确匹配，而是按优先级尝试 9 种替换器：
+SimpleReplacer → LineTrimmedReplacer → BlockAnchorReplacer → WhitespaceNormalizedReplacer →
+IndentationFlexibleReplacer → EscapeNormalizedReplacer → TrimmedBoundaryReplacer →
+ContextAwareReplacer → MultiOccurrenceReplacer。
+
+LLM 生成的 old_string 经常有微小差异（缩进不同、空行多余），模糊匹配大幅提升成功率。
+我们只做精确匹配。
+
+**生产影响**：LLM 频繁遇到"old_string not found"错误，需要多次重试，浪费 token 和时间。
+
+### Edit 后的 LSP 诊断
+
+OpenCode 编辑文件后会调用 LSP 获取最多 20 条编译错误，返回给 LLM。
+LLM 能立即知道自己写的代码有没有语法错误。
+
+**生产影响**：没有即时反馈，LLM 要等用户运行编译才能发现错误。
+
+### Edit 的文件锁和时间戳校验
+
+OpenCode 用 `FileTime.withLock()` 和 `FileTime.assert()` 确保编辑时文件没有被并发修改。
+如果文件在上次读取后被改过，edit 会拒绝执行。
+
+**生产影响**：多 Agent 或用户手动编辑同一文件时可能互相覆盖。
+
+### Grep 使用 ripgrep
+
+OpenCode 调用 ripgrep 二进制（`rg`），性能远超逐文件 Java 正则。
+ripgrep 支持 .gitignore 规则、自动跳过二进制、多线程搜索。
+
+**生产影响**：大型代码库（万级文件）中搜索会明显变慢。
+
+### 按文件修改时间排序
+
+OpenCode 的 grep 结果按文件修改时间排序（最近修改的排前面），
+因为最近改过的文件通常是最相关的。我们按文件遍历顺序返回。
+
+**生产影响**：搜索结果可能把不相关的旧文件排在前面。
+
 ## 下一步预告
 
 工具基本齐了，接下来大概率会做：

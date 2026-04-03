@@ -43,6 +43,12 @@
   - REPL 命令：`/new`（新建）、`/history`（列表）、`/clear`（清除所有数据）
   - [设计文档](docs/04-session-persistence.md)
 
+- **v0.5-compaction** — 消息压缩
+  - 参考 OpenCode 的两层压缩：Pruning（修剪旧工具输出）+ Summarization（LLM 摘要）
+  - Token 估算：`text.length / 4`
+  - 超过 80K token 自动触发，长对话不再溢出
+  - [设计文档](docs/05-compaction.md)
+
 ## 快速开始
 
 ```bash

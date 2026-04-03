@@ -89,9 +89,14 @@ public class Repl implements CommandLineRunner {
                 log.error("Agent error", e);
             }
 
-            // 保存本轮新增的消息
-            for (int i = beforeSize; i < history.size(); i++) {
-                repo.saveMessage(current[0].id(), i, history.get(i));
+            // 保存：如果发生了压缩，重写整个消息历史；否则增量保存
+            if (loop.getCompactor().wasCompacted()) {
+                repo.replaceMessages(current[0].id(), history);
+                loop.getCompactor().resetCompacted();
+            } else {
+                for (int i = beforeSize; i < history.size(); i++) {
+                    repo.saveMessage(current[0].id(), i, history.get(i));
+                }
             }
             repo.touchSession(current[0].id());
 
