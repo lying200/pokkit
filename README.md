@@ -62,6 +62,12 @@
   - 权限继承：子 Agent 禁止 task（防止嵌套），权限从 AgentConfig 获取
   - [设计文档](docs/07-multi-agent.md)
 
+- **v0.8-hook** — Hook 事件系统
+  - 参考 AgentScope Java，核心循环通过 Hook 扩展而非硬编码
+  - 4 个事件：PreReasoning / PostReasoning / PreActing / PostActing
+  - PermissionHook：权限检查从循环中解耦为 Hook 实现
+  - [设计文档](docs/08-hook-system.md)
+
 ## 快速开始
 
 ```bash

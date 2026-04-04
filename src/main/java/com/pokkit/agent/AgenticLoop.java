@@ -1,6 +1,10 @@
 package com.pokkit.agent;
 
-import com.pokkit.permission.PermissionService;
+import com.pokkit.hook.HookRegistry;
+import com.pokkit.hook.PostActingEvent;
+import com.pokkit.hook.PostReasoningEvent;
+import com.pokkit.hook.PreActingEvent;
+import com.pokkit.hook.PreReasoningEvent;
 import com.pokkit.tool.Tool;
 import com.pokkit.tool.ToolRegistry;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -26,8 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Agentic Loop — 整个项目的核心。
  * <p>
- * 接收 AgentConfig 来决定 system prompt、权限规则、最大步数。
- * 同一个循环 + 不同配置 = 不同 Agent 行为。
+ * 核心循环只负责 LLM 调用和工具执行，横切逻辑（权限、日志、RAG 等）通过 Hook 注入。
  */
 public class AgenticLoop {
 
@@ -36,15 +39,15 @@ public class AgenticLoop {
 
     private final ChatModel chatModel;
     private final ToolRegistry toolRegistry;
-    private final PermissionService permissionService;
+    private final HookRegistry hookRegistry;
     private final MessageCompactor compactor;
     private final AgentConfig agentConfig;
 
     public AgenticLoop(ChatModel chatModel, ToolRegistry toolRegistry,
-                       PermissionService permissionService, AgentConfig agentConfig) {
+                       HookRegistry hookRegistry, AgentConfig agentConfig) {
         this.chatModel = chatModel;
         this.toolRegistry = toolRegistry;
-        this.permissionService = permissionService;
+        this.hookRegistry = hookRegistry;
         this.compactor = new MessageCompactor(chatModel);
         this.agentConfig = agentConfig;
     }
@@ -78,15 +81,28 @@ public class AgenticLoop {
 
             compactor.compactIfNeeded(conversationHistory);
 
+            // 构建消息列表
             List<Message> messages = new ArrayList<>();
             messages.add(new SystemMessage(agentConfig.systemPrompt()));
             messages.addAll(conversationHistory);
 
+            // Hook: PreReasoning — 可修改消息列表
+            var preReasoning = new PreReasoningEvent(messages);
+            hookRegistry.fire(preReasoning);
+            if (preReasoning.isStopRequested()) return;
+            messages = preReasoning.getMessages();
+
+            // 流式调用 LLM
             ChatResponse response = streamAndPrint(new Prompt(messages, options));
             if (response == null) {
-                System.out.println("\n[" + agentConfig.name() + "] empty response from LLM, stopping");
+                System.out.println("\n[" + agentConfig.name() + "] empty response, stopping");
                 return;
             }
+
+            // Hook: PostReasoning — 可检查响应、终止循环
+            var postReasoning = new PostReasoningEvent(response);
+            hookRegistry.fire(postReasoning);
+            if (postReasoning.isStopRequested()) return;
 
             var generation = response.getResult();
             if (generation == null) {
@@ -120,20 +136,30 @@ public class AgenticLoop {
                         ? toolCall.arguments() : toolCall.arguments().substring(0, 120) + "...";
                 System.out.println("[" + agentConfig.name() + ":tool] " + toolCall.name() + " " + argsPreview);
 
+                // Hook: PreActing — 权限检查、审批等
+                var preActing = new PreActingEvent(toolCall.name(), toolCall.arguments(), argsPreview);
+                hookRegistry.fire(preActing);
+
                 String output;
-                try {
-                    Tool tool = toolRegistry.get(toolCall.name());
-                    var permResult = permissionService.check(toolCall.name(), argsPreview);
-                    if (permResult == PermissionService.CheckResult.DENIED) {
-                        output = "Permission denied for this tool call by rule. Try a different approach.";
-                    } else if (permResult == PermissionService.CheckResult.REJECTED) {
-                        output = "User rejected this tool call. Adjust your approach or ask the user what they'd prefer.";
-                    } else {
+                if (preActing.isSkipped()) {
+                    // Hook 跳过了这个工具（如权限拒绝）
+                    output = preActing.getSkipResult();
+                } else if (preActing.isStopRequested()) {
+                    return;
+                } else {
+                    try {
+                        Tool tool = toolRegistry.get(toolCall.name());
                         output = tool.execute(toolCall.arguments());
+                    } catch (Exception e) {
+                        output = "Error: " + e.getMessage();
                     }
-                } catch (Exception e) {
-                    output = "Error: " + e.getMessage();
                 }
+
+                // Hook: PostActing — 可修改输出
+                var postActing = new PostActingEvent(toolCall.name(), output);
+                hookRegistry.fire(postActing);
+                if (postActing.isStopRequested()) return;
+                output = postActing.getOutput();
 
                 if (output.length() > MAX_OUTPUT_LENGTH) {
                     output = output.substring(0, MAX_OUTPUT_LENGTH) + "\n[output truncated]";

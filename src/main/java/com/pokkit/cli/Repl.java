@@ -3,6 +3,8 @@ package com.pokkit.cli;
 import com.pokkit.agent.AgentConfig;
 import com.pokkit.agent.AgentRegistry;
 import com.pokkit.agent.AgenticLoop;
+import com.pokkit.hook.HookRegistry;
+import com.pokkit.hook.PermissionHook;
 import com.pokkit.permission.Permission.Rule;
 import com.pokkit.permission.PermissionService;
 import com.pokkit.session.Session;
@@ -48,11 +50,9 @@ public class Repl implements CommandLineRunner {
     public void run(String... args) {
         Scanner scanner = new Scanner(System.in);
 
-        // Agent 注册表
         AgentRegistry agentRegistry = new AgentRegistry();
         AgentConfig primaryAgent = agentRegistry.defaultAgent();
 
-        // 工具注册（包括 TaskTool）
         ToolRegistry toolRegistry = new ToolRegistry();
         toolRegistry.register(new BashTool());
         toolRegistry.register(new ReadTool());
@@ -62,22 +62,23 @@ public class Repl implements CommandLineRunner {
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new TaskTool(chatModel, agentRegistry, toolRegistry, scanner));
 
-        // 打开数据库
         String dbPath = System.getProperty("pokkit.db",
                 Path.of(System.getProperty("user.home"), ".pokkit", "data.db").toString());
         SessionRepository repo = new SessionRepository(dbPath);
 
-        // 恢复最近会话或新建
         Session[] current = new Session[1];
         current[0] = repo.lastSession().orElseGet(() -> repo.createSession("新会话"));
         List<Message> history = new ArrayList<>(repo.loadMessages(current[0].id()));
 
-        // 恢复 session 级权限规则，base rules 来自主 Agent 配置
+        // 权限服务 + Hook 注册
         List<Rule> restoredRules = repo.loadPermissions(current[0].id());
         PermissionService permissionService = new PermissionService(
                 scanner, primaryAgent.permissionRules(), restoredRules);
 
-        AgenticLoop loop = new AgenticLoop(chatModel, toolRegistry, permissionService, primaryAgent);
+        HookRegistry hookRegistry = new HookRegistry();
+        hookRegistry.add(new PermissionHook(permissionService));
+
+        AgenticLoop loop = new AgenticLoop(chatModel, toolRegistry, hookRegistry, primaryAgent);
 
         System.out.println("Pokkit Agent [" + primaryAgent.name() + "] (输入 /help 查看命令，exit 退出)");
         System.out.println("会话: " + current[0].title());
@@ -95,8 +96,7 @@ public class Repl implements CommandLineRunner {
             if (input.equalsIgnoreCase("exit")) break;
 
             if (input.startsWith("/")) {
-                current[0] = handleCommand(input, repo, current[0], history,
-                        permissionService);
+                current[0] = handleCommand(input, repo, current[0], history, permissionService);
                 continue;
             }
 
@@ -107,7 +107,6 @@ public class Repl implements CommandLineRunner {
                 log.error("Agent error", e);
             }
 
-            // 保存
             if (loop.getCompactor().wasCompacted()) {
                 repo.replaceMessages(current[0].id(), history);
                 loop.getCompactor().resetCompacted();

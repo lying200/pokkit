@@ -3,6 +3,8 @@ package com.pokkit.tool;
 import com.pokkit.agent.AgentConfig;
 import com.pokkit.agent.AgentRegistry;
 import com.pokkit.agent.AgenticLoop;
+import com.pokkit.hook.HookRegistry;
+import com.pokkit.hook.PermissionHook;
 import com.pokkit.permission.PermissionService;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatModel;
@@ -104,13 +106,14 @@ public class TaskTool implements Tool {
                 }
             }
 
-            // 子 Agent 用自己的权限规则，不继承父 Agent 的 session 级 always 规则
+            // 子 Agent 用自己的权限规则，通过 Hook 注入
             PermissionService childPermission = new PermissionService(scanner, subagentConfig.permissionRules());
+            HookRegistry childHooks = new HookRegistry();
+            childHooks.add(new PermissionHook(childPermission));
 
-            // 独立的消息历史
             List<Message> childHistory = new ArrayList<>();
 
-            AgenticLoop childLoop = new AgenticLoop(chatModel, childTools, childPermission, subagentConfig);
+            AgenticLoop childLoop = new AgenticLoop(chatModel, childTools, childHooks, subagentConfig);
             childLoop.run(prompt, childHistory);
 
             // 提取子 Agent 的最终文本回复
